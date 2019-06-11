@@ -1,6 +1,9 @@
 ---
 title: "WPT_ECB_20190530"
-output: html_document
+output:
+  pagedown::html_paged: 
+    toc: true
+    number_sections: false
 ---
 
 ```{r setup, include=FALSE}
@@ -17,152 +20,50 @@ I will use ULC (calculated as the total compensation per sector devided by the r
 The data starts from Q1 2006 because of previously missing data or a change of measurment method for the compensation and sector GDP (from sna93 to cls11).
 
 
-```{r data, echo=FALSE}
-
-
-#load raw data
-
-setwd("G:/zrtm/Michael Kozin/R/WPT_ECB")
-
-# install.packages(pkgs = "patchwork", repos= "file:///W:/R_Packages/miki/local repo April 2019/",type = "win.binary",dependencies = TRUE)
-
+```{r}
 
 library(readxl)
-library(dplyr)
-library(cowplot)
 
-data=read_excel("Data_20190528.xlsx", sheet = "R_data" , range = "A2:R56", col_names = TRUE,
-  col_types = NULL, na = "", trim_ws = TRUE, skip = 1,
-  n_max = 2000, guess_max = min(1000, 2000),
-  progress = readxl_progress(), .name_repair = "unique")
-
-
-
-# dldata = data.frame(apply(data[2:ncol(data)], 2, function(col){
-#   return(col-lag(col))
-# }))
-
-
-# generate year on year change matrix
-dldata_YOY = data[2:ncol(data)] %>% 
-  apply(2, function(col){
-    return(log(col)-lag(log(col),4))}) %>% 
-  data.frame()
-
-names(dldata_YOY) = paste("dl_",names(dldata_YOY), sep="")
-
-dldata_YOY=cbind(dates=data$DATE,dldata_YOY)
-
-# generate Quarter on Quarter change matrix
-dldata_QOQ = data[2:ncol(data)] %>% 
-  apply(2, function(col){
-    return(log(col)-lag(log(col),1))}) %>% 
-  data.frame()
-
-names(dldata_QOQ) = paste("dl_",names(dldata_QOQ), sep="")
-
-dldata_QOQ=cbind(dates=data$DATE,dldata_QOQ)
-
-# generate half year on half year change matrix
-dldata_2q = data[2:ncol(data)] %>% 
-  apply(2, function(col){
-    return(log(col)-lag(log(col),2))}) %>% 
-  data.frame()
-
-names(dldata_2q) = paste("dl_",names(dldata_2q), sep="")
-
-dldata_2q=cbind(dates=data$DATE,dldata_2q)
+df <- read_xlsx("data/wage-inflation-data.xlsx", sheet = "R_data", skip = 1)
 
 ```
-# Labour costs and inflation - Year on Year change 
-```{r YOY, echo=FALSE, warning=FALSE, message=FALSE}
-
-library(ggplot2)
-library(reshape2)
-library(cowplot)
-library(gridExtra)
-library(scales)
 
 
+```{r}
+library(tidyverse)
+library(lubridate)
 
-data_p = melt(dldata_YOY, id.vars = "dates")
-
-vals=c("ag", "ind", "el", "const", "tran", "ser_pub", "ser_bis")
-
-plot_l = lapply(vals, function(v, df){
-  
-  v1 = paste("dl_p_",v, sep="")
-  v2= paste("dl_lc_",v, sep="")
-  
-  df%>%
-    filter(variable == v1 | variable == v2) %>%
-    ggplot(., aes(x=dates, y=value,color=variable)) + 
-    theme(axis.text=element_text(size=8),
-        axis.title=element_text(size=9), legend.text=element_text(5), axis.title.x=element_blank(), axis.title.y=element_blank())+
-    theme(text=element_text(size=9),axis.text.x = element_text(angle = 65, hjust = 1))+ scale_x_datetime(date_labels = "%m-%y",date_breaks = "12 month") +
-    geom_line() %>% 
-    return()
-  
-},df=data_p)
-
-plot_l[[8]]=  data_p%>%
-    filter(variable == "dl_p" | variable == "dl_lc") %>%
-    ggplot(., aes(x=dates, y=value,color=variable)) +
-    theme(axis.text=element_text(size=8),
-        axis.title=element_text(size=9), legend.text=element_text(5), axis.title.x=element_blank(), axis.title.y=element_blank())+
-    theme(text=element_text(size=9),axis.text.x = element_text(angle = 65, hjust = 1))+ scale_x_datetime(date_labels = "%m-%y",date_breaks = "12 month") +
-    geom_line()
-
-
-
-grid.arrange(grobs=plot_l, nrow=4, ncol=2)
-
-
-
-
-
-
+df_tidy <- df %>% 
+  mutate(DATE = ymd(DATE)) %>% 
+  gather("index", "value", -DATE) %>% 
+  separate(index,
+           into = c("type", "sector"),
+           sep = "_",
+           extra = "merge")
 
 
 ```
 
-## Cross correlations
-
-cross correlations for the ULC per sector and corresponding sectoiral CPI yield the following cross correlations:
-
-```{r cross correlations, echo=FALSE}
-
-ccf=ccf(dldata_YOY$dl_p_ag,dldata_YOY$dl_lc_ag, plot=TRUE, na.action=na.pass)
 
 
-####
-vals=c("ag", "ind", "el", "const", "tran", "ser_pub", "ser_bis")
+```{r}
+
+df_change <- df_tidy %>% 
+  group_by(type, sector) %>% 
+  mutate(dlog_value_q = 400*(log(value) - log(lag(value)))) %>% 
+  mutate(dlog_value_y = 400*(log(value) - log(lag(value, 4)))) %>% 
+  drop_na()
 
 
-plot_ccf = lapply(vals, function(v, df){
+df_change %>% 
+  filter(sector != "bs") %>% 
+  ggplot(aes(DATE, dlog_value_y, color = type)) +
+  geom_line(size = 1) +
+  facet_wrap( ~ sector, scales = "free") +
+  theme_light()
   
-  v1 = paste("dl_p_",v, sep="")
-  v2= paste("dl_lc_",v, sep="")
-  
-  print(v1)
-  print(v2)
-  
-  df%>% select(v1,v2) 
-  #   # filter(variable == v1 | variable == v2) %>%
-  ccf(dldata_YOY$v1,dldata_YOY$v2,plot=FALSE, na.action=na.pass)
-  #   return()
-  # 
-},df=dldata_YOY)
-
-
-# library(ggplot2)
-# y = as.numeric(ccf[["acf"]])
-# x = as.numeric(ccf[["lag"]])
-# df = data.frame(x,y)
-# 
-# ggplot(df,aes(x = x, y = y)) +
-#   geom_line()
-
 
 ```
+
+
 
