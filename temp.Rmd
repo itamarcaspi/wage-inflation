@@ -1,0 +1,254 @@
+---
+title: "WPT_ECB_20190530"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+ggacf <- function(x,y, ci=0.95, type="cross-correlation", xlab="Lag", ylab=NULL,
+                  ylim=NULL, main=NULL, ci.col="blue", lag.max=NULL, na.action=na.pass) {
+    x <- as.data.frame(x)
+    y <- as.data.frame(y)
+
+    x.acf <- ccf(x,y,plot=F, lag.max=lag.max, type=type, na.action=na.action)
+    ci.line <- qnorm((1 - ci) / 2) / sqrt(x.acf$n.used)
+    d.acf <- data.frame(lag=x.acf$lag, acf=x.acf$acf)
+    g <- ggplot(d.acf, aes(x=lag, y=acf)) +
+        geom_hline(yintercept=0) +
+        geom_segment(aes(xend=lag, yend=0)) +
+        geom_hline(yintercept=ci.line, color=ci.col, linetype="dashed") +
+        geom_hline(yintercept=-ci.line, color=ci.col, linetype="dashed") +
+        theme_bw() +
+        xlab("Lag") +
+        ggtitle(ifelse(is.null(main), "", main)) +
+        # if (is.null(ylab))
+        #     ylab(ifelse(type=="partial", "PACF", "ACF"))
+        # else
+            ylab(ylab)
+    g
+}
+
+```
+
+## The method
+
+I will implement the first basic evaluation methods for the relation between labour costs inflation and price inflation following the first section dispalyed in the ECB's workign paper no.2235. The evaluation will include *cross-correlations and granger causality* tests.
+
+I will use ULC (calculated as the total compensation per sector devided by the real GDP per sector) and use the sector inflation.
+
+## The data
+The data starts from Q1 2006 because of previously missing data or a change of measurment method for the compensation and sector GDP (from sna93 to cls11).
+
+
+```{r data, echo=FALSE, warning=FALSE, message=FALSE}
+
+
+#load raw data
+
+# install.packages(pkgs = "patchwork", repos= "file:///W:/R_Packages/miki/local repo April 2019/",type = "win.binary",dependencies = TRUE)
+
+
+library(readxl)
+library(dplyr)
+library(lubridate)
+
+
+data <- read_excel("data/data.xlsx", sheet = "R_data", skip = 1)
+
+
+
+# dldata = data.frame(apply(data[2:ncol(data)], 2, function(col){
+#   return(col-lag(col))
+# }))
+
+
+# generate year on year change matrix
+dldata_YOY = data[2:ncol(data)] %>% 
+  apply(2, function(col){
+    return(log(col)-lag(log(col),4))}) %>% 
+  data.frame()
+
+names(dldata_YOY) = paste("dl_",names(dldata_YOY), sep="")
+
+dldata_YOY=cbind(dates=data$DATE,dldata_YOY)
+
+# generate Quarter on Quarter change matrix
+dldata_QOQ = data[2:ncol(data)] %>% 
+  apply(2, function(col){
+    return(log(col)-lag(log(col),1))}) %>% 
+  data.frame()
+
+names(dldata_QOQ) = paste("dl_",names(dldata_QOQ), sep="")
+
+dldata_QOQ=cbind(dates=data$DATE,dldata_QOQ)
+
+# generate half year on half year change matrix
+dldata_2q = data[2:ncol(data)] %>% 
+  apply(2, function(col){
+    return(log(col)-lag(log(col),2))}) %>% 
+  data.frame()
+
+names(dldata_2q) = paste("dl_",names(dldata_2q), sep="")
+
+dldata_2q=cbind(dates=data$DATE,dldata_2q)
+
+```
+
+
+# Labour costs and inflation - Year on Year change 
+```{r YOY, echo=FALSE, warning=FALSE, message=FALSE}
+
+library(ggplot2)
+library(reshape2)
+library(cowplot)
+library(gridExtra)
+library(scales)
+
+
+
+data_p = melt(dldata_YOY, id.vars = "dates")
+
+vals=c("ag", "ind", "el", "const", "tran", "ser_pub", "ser_bis", "total")
+
+plot_l = lapply(vals, function(v, df){
+  
+  v1 = paste("dl_p_",v, sep="")
+  v2= paste("dl_lc_",v, sep="")
+  
+  df%>%
+    filter(variable == v1 | variable == v2) %>%
+    ggplot(., aes(x=dates, y=value,color=variable)) + 
+    theme(axis.text=element_text(size=8),
+        axis.title=element_text(size=9), legend.text=element_text(5), axis.title.x=element_blank(), axis.title.y=element_blank())+
+    theme(text=element_text(size=9),axis.text.x = element_text(angle = 65, hjust = 1))+ scale_x_datetime(date_labels = "%m-%y",date_breaks = "12 month") +
+    geom_line() %>% 
+    return()
+  
+},df=data_p)
+
+# plot_l[[8]]=  data_p%>%
+#     filter(variable == "dl_p" | variable == "dl_lc") %>%
+#     ggplot(., aes(x=dates, y=value,color=variable)) +
+#     theme(axis.text=element_text(size=8),
+#         axis.title=element_text(size=9), legend.text=element_text(5), axis.title.x=element_blank(), axis.title.y=element_blank())+
+#     theme(text=element_text(size=9),axis.text.x = element_text(angle = 65, hjust = 1))+ scale_x_datetime(date_labels = "%m-%y",date_breaks = "12 month") +
+#     geom_line()
+
+
+
+grid.arrange(grobs=plot_l, nrow=4, ncol=2)
+
+
+```
+
+## Cross correlations
+
+cross correlations for the ULC per sector and corresponding sectoiral CPI yield the following cross correlations:
+
+```{r cross correlations, echo=FALSE}
+
+vals=c("ag", "ind", "el", "const", "tran", "ser_pub", "ser_bis", "total")
+
+plot_ccf = lapply(vals, function(v, df){
+  
+  v1 = paste("dl_p_",v, sep="")
+  v2= paste("dl_lc_",v, sep="")
+  
+  new = df%>% select(v1,v2) 
+  # ccf(new[,1],new[,2],plot=FALSE, na.action=na.pass, lag.max=10, ylab = "cross-correlation")
+  #    return()
+  
+  ggacf(new[,1],new[,2], ci=0.95, type="correlation", xlab="Lag", ylab=NULL,
+                  ylim=NULL, main=NULL, ci.col="blue", lag.max=10, na.action=na.pass)
+
+  
+},df=dldata_YOY)
+
+# plot_ccf[[8]] = ggacf(dldata_YOY$dl_p,dldata_YOY$dl_lc, ci=0.95, type="correlation", xlab="Lag", ylab=NULL,
+#                   ylim=NULL, main=NULL, ci.col="blue", lag.max=10, na.action=na.pass)
+
+
+
+cowplot::plot_grid(plotlist = plot_ccf, ncol=4, labels=c("Agriculture", "Industry", "Electricity & Water", "Contruction", "Transportation", "Public Services",
+                                                         "Business Services", "Total"), label_size=10, align="hv", hjust=0)
+
+
+
+
+
+
+```
+
+
+## Granger causality
+
+test for granger causality in both direction (ULC to prices and vice versa).The data is Quarter on Quarter change.
+
+```{r echo=F, warning=FALSE, message=FALSE}
+
+library(lmtest)
+library(broom)
+library(tidyr)
+
+vals=c("ag", "ind", "el", "const", "tran", "ser_pub", "ser_bis", "total")
+
+plot_gr = lapply(vals, function(v, gr_df){
+x <- gr_df %>% 
+  select(ends_with(v)) %>% 
+  ts()
+
+gr_results_1 <- grangertest(x[,1] ~ x[,2], order = 4, gr_df) %>% 
+  tidy()
+
+gr_results_2 <- grangertest(x[,2] ~ x[,1], order = 4, gr_df) %>% 
+  tidy()
+
+
+bind_rows(gr_results_1,gr_results_2) %>% 
+  drop_na() %>% 
+  # mutate(nrow = 1:2) %>% 
+  mutate(direction = c("lc -> p" , "p -> lc")) %>%
+
+  ggplot() +
+  geom_col(aes(x=direction, y=p.value, fill=p.value<0.05))+
+  theme(axis.text=element_text(size=8),
+        axis.title=element_text(size=9), legend.text=element_text(5), axis.title.x=element_blank(), axis.title.y=element_blank())+
+  theme(text=element_text(size=9),axis.text.x = element_text(angle = 65, hjust = 1))
+  
+
+}, gr_df=dldata_QOQ)
+
+
+
+cowplot::plot_grid(plotlist = plot_gr, ncol=3, labels=c("Agriculture", "Industry", "Electricity & Water", "Contruction", "Transportation", "Public                   Services", "Business Services", "Total"), label_size=8, align="hv")
+
+
+
+#### itamar's version:
+
+# gr_df <- dldata_QOQ %>% 
+#   select(ends_with("ag")) %>% 
+#   ts()
+# 
+# gr_results_1 <- grangertest(dl_lc_ag ~ dl_p_ag, order = 4, gr_df) %>% 
+#   tidy()
+# 
+# gr_results_2 <- grangertest(dl_p_ag ~ dl_lc_ag, order = 4, gr_df) %>% 
+#   tidy()
+# 
+# 
+# bind_rows(gr_results_1,gr_results_2) %>% 
+#   drop_na() %>%
+#   # mutate(nrow = 1:2) %>% 
+#   mutate(nrow = c("p->lc" , "lc->p")) %>%
+#   ggplot() +
+#   geom_col(aes(nrow, p.value))
+
+# grangertest(dl_p_ag ~ dl_lc_ag, order = 4, dldata_QOQ)
+# grangertest(dl_lc_ag ~ dl_p_ag, order = 4, dldata_QOQ)
+
+```
+
+
+
