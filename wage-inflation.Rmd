@@ -44,7 +44,7 @@ I will use ULC (calculated as the total compensation per sector divided by the r
 The data starts from Q1 2006 because of previously missing data or a change of measurement method for the compensation and sector GDP (from sna93 to cls11).
 
 
-```{r read data}
+```{r read_data}
 
 library(readxl)
 
@@ -96,7 +96,6 @@ df_change <- df_tidy %>%
   group_by(type, sector_code) %>% 
   mutate(dlog_value_q = 400*(log(value) - log(lag(value)))) %>% 
   mutate(dlog_value_y = 100*(log(value) - log(lag(value, 4)))) %>% 
-  mutate(dlog_value_q_scaled = scale(dlog_value_q)[,]) %>% 
   drop_na() %>% 
   ungroup()
 
@@ -116,7 +115,7 @@ seas_adj <- function(df) {
 }
 
 df_change_sa <- df_change %>%
-  group_by(type, sector_code) %>% 
+  group_by(type, sector_code) %>%
   mutate(dlog_value_q_sa = seas_adj(dlog_value_q)) %>% 
   ungroup()
 
@@ -127,7 +126,7 @@ Next, we plot the data
 
 ```{r yoy_plot, fig.height=5}
 
-theme_set(theme_minimal())
+theme_set(theme_light())
 
 df_change %>% 
   ggplot(aes(DATE, dlog_value_y, color = type)) +
@@ -147,9 +146,9 @@ Prepare (nest) the data for the `ccf` and `grangertet` functions
 ```{r nest_data}
 
 df_nest <- df_change %>%
-  select(DATE, type, sector_name, dlog_value_q) %>% 
+  select(DATE, type, sector_name, dlog_value_y) %>% 
   nest(-sector_name) %>% 
-  mutate(data_spread = map(data, ~ spread(.x, type, dlog_value_q))) %>% 
+  mutate(data_spread = map(data, ~ spread(.x, type, dlog_value_y))) %>% 
   mutate(data_spread = map(data_spread, ~ drop_na(.x)))
 
 ```
@@ -277,13 +276,15 @@ granger_fun <- function(tsb, lag.order) {
   
   result_12 <- lmtest::grangertest(tsb[,2] ~ tsb[,1],
                                 order = lag.order)
-  bind_rows(broom::tidy(result_21), broom::tidy(result_12)) %>% 
-    drop_na() %>% 
-    select(statistic) %>% 
-    pull()
+  
+  c(result_21$F[2], result_12$F[2])
 }
 
 ```
+
+
+
+
 
 
 ```{r granger_boot}
@@ -292,7 +293,7 @@ library(boot) # for the bootstrap
 library(furrr) # for parallel computation
 plan(multiprocess)
 
-boot_rep <- 199
+boot_rep <- 99
 block_length <- round(48^(1/3))
 lag_order <- 4
 sim <- "geom"
@@ -313,7 +314,7 @@ df_granger_boot <- df_nest %>%
 
 ```
 
-
+Next, we plot the results of the bootstrap Granger causality tests. In particular, 
 
 ```{r plot_bootstrap}
 df_granger_boot %>%
@@ -336,6 +337,7 @@ df_granger_boot %>%
   theme(legend.position="top")
 
 ```
+
 
 
 ## References
