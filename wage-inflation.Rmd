@@ -284,9 +284,6 @@ granger_fun <- function(tsb, lag.order) {
 
 
 
-
-
-
 ```{r granger_boot}
 
 library(boot) # for the bootstrap
@@ -340,5 +337,51 @@ df_granger_boot %>%
 
 
 
+## PCA
+
+
+```{r}
+
+library(corrr)
+library(corrplot)
+
+df %>% 
+  select(starts_with("p_")) %>% 
+  select(-p_all) %>%
+  mutate_all(~ 100*(log(.)-log(lag(. ,8)))) %>% 
+  drop_na() %>% 
+  cor() %>% 
+  corrplot(type = "lower",
+           order = "FPC",
+           method = "ellipse")
+
+
+df %>% 
+  # select(starts_with("lc_")) %>% 
+  select(-DATE, -lc_bs, -lc_all, -p_all) %>%
+  mutate_all(~ 100*(log(.)-log(lag(. ,8)))) %>% 
+  drop_na() %>% 
+  cor() %>% 
+  corrplot(type = "lower",
+           order = "hclust",
+           method = "ellipse")
+
+
+
+```
+
+
 ## References
+
+
+Gali, Jordi, and Luca Gambetti. "Has the U.S. wage Phillips curve flattened? A semi‐structural exploratio." National Bureau of Economic Research working paper 25476.
+
+Stock, James H., and Mark W. Watson. "Slack and cyclically sensitive inflation.”  Working Paper (2018b).  
+
+McLeay, Michael, and Silvana Tenreyro.  “Optimal inflation and the identification of the Phillips curve.” 
+
+Hooper Peter, Frederic S. Mishkin and Amir Sufi: Prospects for inflation in a high pressure economy: Is the Phillips curve dead or is it just hibernating?  National Bureau of Economic Research working paper 25792 (2018)
+
+
+
 
